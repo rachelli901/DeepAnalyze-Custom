@@ -1,8 +1,0 @@
-{
-  "required_missing": [],
-  "optional_gaps": [
-    "尚未形成自动化单元测试文件；验证来自实际 Mock 运行和模拟失败运行。",
-    "修改尚未形成独立 commit。"
-  ],
-  "attachments": []
-}

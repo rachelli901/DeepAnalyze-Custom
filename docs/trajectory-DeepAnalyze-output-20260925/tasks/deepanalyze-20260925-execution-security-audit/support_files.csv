@@ -1,4 +1,0 @@
-"material","role","availability","safe_locator"
-"原生会话 JSONL","保存审计检索、源码证据和结论","完整","sessions/2026/09/25/rollout-2026-09-25T17-07-03-01a0d7d1-7324-77a1-98dd-8bfd4d186313.jsonl#L450-L490"
-"workspace/deepanalyze.py","执行机制与超时边界的主要证据","审计时版本可从会话与 Git 基线恢复","workspace/deepanalyze.py"
-"workspace/run.py","调用入口和进程权限上下文","审计时版本可从会话与 Git 基线恢复","workspace/run.py"

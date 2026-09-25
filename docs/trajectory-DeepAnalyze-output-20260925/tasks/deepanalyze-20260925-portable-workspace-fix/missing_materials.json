@@ -1,8 +1,0 @@
-{
-  "required_missing": [],
-  "optional_gaps": [
-    "vLLM 服务未启动，因此本次只验证路径修复和进程行为；API 可用性验证由后续 Mock 任务覆盖。",
-    "修改尚未形成独立 commit。"
-  ],
-  "attachments": []
-}

@@ -1,4 +1,0 @@
-"material","role","availability","safe_locator"
-"原生会话 JSONL","保存重构、溢出修复、Mock 测试和最终 diff","完整","sessions/2026/09/25/rollout-2026-09-25T17-07-03-01a0d7d1-7324-77a1-98dd-8bfd4d186313.jsonl#L492-L629"
-"workspace/deepanalyze.py","子进程、超时和 AST 安全检查实现","最终版本存在；基线由 Git commit 007389c 提供","workspace/deepanalyze.py"
-"workspace/run.py","Mock 模式入口和错误退出集成","最终版本存在；基线由 Git commit 007389c 提供","workspace/run.py"

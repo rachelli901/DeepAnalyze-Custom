@@ -1,7 +1,0 @@
-{
-  "required_missing": [],
-  "optional_gaps": [
-    "本次任务为诊断型轨迹，没有把修复写入工作区；修复由后续任务独立完成。"
-  ],
-  "attachments": []
-}

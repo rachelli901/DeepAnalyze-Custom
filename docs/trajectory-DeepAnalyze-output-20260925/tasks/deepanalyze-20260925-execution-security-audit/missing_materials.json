@@ -1,7 +1,0 @@
-{
-  "required_missing": [],
-  "optional_gaps": [
-    "审计未执行真实破坏性代码，也没有独立安全测试文件；证据来自静态源码和调用链检查。"
-  ],
-  "attachments": []
-}
