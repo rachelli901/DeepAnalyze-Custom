@@ -1,16 +1,143 @@
-import re
-import io
-import traceback
-import contextlib
+import ast
+import logging
 import os
-import requests
+import re
+import subprocess
+import sys
 from pathlib import Path
+from typing import Optional, Sequence, Union
+
+import requests
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_MOCK_RESPONSES = (
+    """<Analyze>
+Mock mode is enabled; the vLLM API request is skipped.
+</Analyze>
+<Code>
+```python
+from pathlib import Path
+
+print("DeepAnalyze mock request completed.")
+print(f"Workspace: {Path.cwd()}")
+print(f"Workspace entries: {len(list(Path.cwd().iterdir()))}")
+```
+</Code>""",
+    "<Answer>Mock generation completed successfully.</Answer>",
+)
+
+
+BLOCKED_MODULES = frozenset({"ctypes", "multiprocessing", "subprocess"})
+BLOCKED_CALLS = frozenset({
+    "__import__",
+    "builtins.__import__",
+    "builtins.compile",
+    "builtins.eval",
+    "builtins.exec",
+    "compile",
+    "eval",
+    "exec",
+    "os._exit",
+    "os.fork",
+    "os.popen",
+    "os.remove",
+    "os.removedirs",
+    "os.rename",
+    "os.replace",
+    "os.rmdir",
+    "os.system",
+    "os.unlink",
+    "shutil.move",
+    "shutil.rmtree",
+})
+BLOCKED_CALL_PREFIXES = ("os.exec", "os.spawn")
+
+
+class UnsafeCodeError(RuntimeError):
+    """Raised when generated code contains a blocked operation."""
+
+
+def _get_qualified_name(node: ast.AST) -> Optional[str]:
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    parts.append(node.id)
+    return ".".join(reversed(parts))
+
+
+def _resolve_imported_name(name: str, aliases: dict) -> str:
+    root, separator, remainder = name.partition(".")
+    resolved_root = aliases.get(root, root)
+    if separator:
+        return f"{resolved_root}.{remainder}"
+    return resolved_root
+
+
+def _validate_code_safety(code_str: str) -> None:
+    """Block a small set of obvious process and destructive operations."""
+    try:
+        tree = ast.parse(code_str)
+    except SyntaxError:
+        # The child interpreter will report syntax errors consistently.
+        return
+
+    aliases = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                module_root = alias.name.split(".", 1)[0]
+                if module_root in BLOCKED_MODULES:
+                    raise UnsafeCodeError(
+                        f"Blocked dangerous module import: {alias.name}"
+                    )
+                local_name = alias.asname or module_root
+                aliases[local_name] = alias.name
+        elif isinstance(node, ast.ImportFrom):
+            module_name = node.module or ""
+            module_root = module_name.split(".", 1)[0]
+            if module_root in BLOCKED_MODULES:
+                raise UnsafeCodeError(
+                    f"Blocked dangerous module import: {module_name}"
+                )
+            for alias in node.names:
+                if alias.name == "*":
+                    if module_root in {"os", "shutil"}:
+                        raise UnsafeCodeError(
+                            f"Blocked wildcard import from: {module_name}"
+                        )
+                    continue
+                local_name = alias.asname or alias.name
+                aliases[local_name] = (
+                    f"{module_name}.{alias.name}" if module_name else alias.name
+                )
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        qualified_name = _get_qualified_name(node.func)
+        if qualified_name is None:
+            continue
+        resolved_name = _resolve_imported_name(qualified_name, aliases)
+        if resolved_name in BLOCKED_CALLS or any(
+            resolved_name.startswith(prefix)
+            for prefix in BLOCKED_CALL_PREFIXES
+        ):
+            raise UnsafeCodeError(
+                f"Blocked dangerous operation: {resolved_name}"
+            )
 
 
 class DeepAnalyzeVLLM:
     """
     DeepAnalyzeVLLM provides functionality to generate and execute code
     using a vLLM API with multi-round reasoning.
+
+    Set ``mock=True`` to exercise the generation and code-execution flow
+    without contacting a vLLM service.
     """
 
     def __init__(
@@ -18,57 +145,104 @@ class DeepAnalyzeVLLM:
         model_name: str,
         api_url: str = "http://localhost:8000/v1/chat/completions",
         max_rounds: int = 30,
+        request_timeout: Optional[float] = 300.0,
+        code_timeout: float = 60.0,
+        mock: bool = False,
+        mock_responses: Optional[Sequence[str]] = None,
     ):
+        if max_rounds <= 0:
+            raise ValueError("max_rounds must be greater than zero")
+        if request_timeout is not None and request_timeout <= 0:
+            raise ValueError("request_timeout must be greater than zero")
+        if code_timeout <= 0:
+            raise ValueError("code_timeout must be greater than zero")
+
+        responses = (
+            DEFAULT_MOCK_RESPONSES
+            if mock_responses is None
+            else tuple(mock_responses)
+        )
+        if mock and not responses:
+            raise ValueError("mock_responses cannot be empty in mock mode")
+
         self.model_name = model_name
         self.api_url = api_url
         self.max_rounds = max_rounds
+        self.request_timeout = request_timeout
+        self.code_timeout = code_timeout
+        self.mock = mock
+        self.mock_responses = responses
+
+    def _get_mock_response(self, round_idx: int) -> str:
+        try:
+            return self.mock_responses[round_idx]
+        except IndexError as exc:
+            raise RuntimeError(
+                "Mock response sequence exhausted at round "
+                f"{round_idx + 1}; provide a final <Answer> response"
+            ) from exc
 
     def execute_code(self, code_str: str) -> str:
         """
-        Executes Python code and captures stdout and stderr outputs.
-        Returns the output or formatted error message.
+        Executes Python code in a fresh subprocess and captures stdout/stderr.
+        Returns the output or a formatted error message.
         """
-        stdout_capture = io.StringIO()
-        stderr_capture = io.StringIO()
+        try:
+            _validate_code_safety(code_str)
+        except UnsafeCodeError as exc:
+            logger.error("Generated code blocked: %s", exc)
+            return f"[Error]:\nSecurityError: {exc}"
 
         try:
-            with contextlib.redirect_stdout(stdout_capture), contextlib.redirect_stderr(
-                stderr_capture
-            ):
-                exec(code_str, {})
-            output = stdout_capture.getvalue()
-            if stderr_capture.getvalue():
-                output += stderr_capture.getvalue()
-            return output
-        except Exception as exec_error:
-            code_lines = code_str.splitlines()
-            tb_lines = traceback.format_exc().splitlines()
-            error_line = None
+            completed = subprocess.run(
+                [sys.executable, "-I", "-"],
+                input=code_str,
+                cwd=Path.cwd(),
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=self.code_timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            timeout_message = (
+                f"代码执行超时：超过 {self.code_timeout:g} 秒，子进程已被终止。"
+            )
+            logger.error("%s", timeout_message)
+            output_parts = []
+            for stream in (exc.stdout, exc.stderr):
+                if stream is None:
+                    continue
+                if isinstance(stream, bytes):
+                    stream = stream.decode(errors="replace")
+                output_parts.append(stream.rstrip())
+            if output_parts:
+                return f"[Error]:\n{timeout_message}\n" + "\n".join(output_parts)
+            return f"[Error]:\n{timeout_message}"
+        except Exception as exc:
+            logger.exception("Failed to start generated-code subprocess")
+            return f"[Error]:\nCode execution subprocess failed: {exc}"
 
-            # Attempt to extract line number from traceback
-            for line in tb_lines:
-                if 'File "<string>", line' in line:
-                    try:
-                        line_num = int(line.split(", line ")[1].split(",")[0])
-                        error_line = line_num
-                        break
-                    except (IndexError, ValueError):
-                        continue
+        output_parts = []
+        if completed.stdout:
+            output_parts.append(completed.stdout.rstrip())
+        if completed.stderr:
+            output_parts.append(completed.stderr.rstrip())
+        if completed.returncode != 0:
+            output_parts.append(
+                f"Process exited with code {completed.returncode}"
+            )
+            logger.debug(
+                "Generated code subprocess exited with code %s",
+                completed.returncode,
+            )
+        return "\n".join(part for part in output_parts if part)
 
-            # Build formatted error message
-            error_message = "Traceback (most recent call last):\n"
-            if error_line and 1 <= error_line <= len(code_lines):
-                error_message += f'  File "<string>", line {error_line}, in <module>\n'
-                error_message += f"    {code_lines[error_line - 1].strip()}\n"
-            error_message += f"{type(exec_error).__name__}: {str(exec_error)}"
-            if stderr_capture.getvalue():
-                error_message += f"\n{stderr_capture.getvalue()}"
-            return f"[Error]:\n{error_message.strip()}"
 
     def generate(
         self,
         prompt: str,
-        workspace: str,
+        workspace: Union[str, os.PathLike],
         temperature: float = 0.5,
         max_tokens: int = 32768,
         top_p: float = None,
@@ -76,16 +250,26 @@ class DeepAnalyzeVLLM:
     ) -> dict:
         """
         Generates content using vLLM API and executes any <Code> blocks found.
-        Returns a dictionary containing the full reasoning process.
+        Returns a dictionary containing the full reasoning process and an
+        ``error`` field when generation fails.
         """
-        original_cwd = os.getcwd()
-        os.chdir(workspace)
+        workspace_path = Path(workspace).expanduser().resolve()
+        if not workspace_path.is_dir():
+            raise FileNotFoundError(
+                f"Workspace does not exist or is not a directory: {workspace_path}"
+            )
+
+        original_cwd = Path.cwd()
+        os.chdir(workspace_path)
         reasoning = ""
+        error_message = None
+        current_round = None
         messages = [{"role": "user", "content": prompt}]
         response_message = []
 
         try:
             for round_idx in range(self.max_rounds):
+                current_round = round_idx + 1
                 payload = {
                     "model": self.model_name,
                     "messages": messages,
@@ -99,18 +283,32 @@ class DeepAnalyzeVLLM:
                 if top_k is not None:
                     payload["top_k"] = top_k
 
-                # Call vLLM API
-                response = requests.post(
-                    self.api_url,
-                    headers={"Content-Type": "application/json"},
-                    json=payload,
-                )
-                response.raise_for_status()
-                response_data = response.json()
+                if self.mock:
+                    logger.info(
+                        "Mock mode enabled; skipping vLLM request for round %d",
+                        current_round,
+                    )
+                    ans = self._get_mock_response(round_idx)
+                else:
+                    logger.debug(
+                        "Sending vLLM request to %s for round %d",
+                        self.api_url,
+                        current_round,
+                    )
+                    response = requests.post(
+                        self.api_url,
+                        headers={"Content-Type": "application/json"},
+                        json=payload,
+                        timeout=self.request_timeout,
+                    )
+                    response.raise_for_status()
+                    response_data = response.json()
 
-                ans = response_data["choices"][0]["message"]["content"]
-                if response_data["choices"][0].get("stop_reason") == "</Code>":
-                    ans += "</Code>"
+                    choices = response_data["choices"]
+                    choice = choices[0]
+                    ans = choice["message"]["content"]
+                    if choice.get("stop_reason") == "</Code>":
+                        ans += "</Code>"
 
                 response_message.append(ans)
 
@@ -137,11 +335,30 @@ class DeepAnalyzeVLLM:
                 # Append messages for next round
                 messages.append({"role": "assistant", "content": ans})
                 messages.append({"role": "execute", "content": exe_output})
+            else:
+                error_message = (
+                    f"Generation stopped after {self.max_rounds} rounds "
+                    "without an <Answer>"
+                )
+                logger.warning(error_message)
 
-            reasoning = "\n".join(response_message)
+        except requests.RequestException as exc:
+            error_message = (
+                f"vLLM API request failed at round {current_round}: {exc}"
+            )
+            logger.exception(error_message)
+        except (KeyError, IndexError, TypeError) as exc:
+            error_message = (
+                f"Unexpected vLLM response at round {current_round}: {exc}"
+            )
+            logger.exception(error_message)
+        except Exception as exc:
+            error_message = (
+                f"DeepAnalyze generation failed at round {current_round}: {exc}"
+            )
+            logger.exception(error_message)
+        finally:
+            os.chdir(original_cwd)
 
-        except Exception:
-            reasoning = "\n".join(response_message)
-
-        os.chdir(original_cwd)
-        return {"reasoning": reasoning}
+        reasoning = "\n".join(response_message)
+        return {"reasoning": reasoning, "error": error_message}

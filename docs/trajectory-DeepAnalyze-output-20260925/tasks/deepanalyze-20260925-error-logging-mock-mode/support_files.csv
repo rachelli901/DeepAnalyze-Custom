@@ -1,0 +1,4 @@
+"material","role","availability","safe_locator"
+"原生会话 JSONL","保存修改、diff、Mock 成功和 502 失败证据","完整","sessions/2026/09/25/rollout-2026-09-25T17-07-03-01a0d7d1-7324-77a1-98dd-8bfd4d186313.jsonl#L326-L448"
+"workspace/deepanalyze.py","异常分类、日志、超时和 Mock 实现","最终版本存在；基线由 Git commit 007389c 提供","workspace/deepanalyze.py"
+"workspace/run.py","日志初始化、Mock 开关和错误退出","最终版本存在；基线由 Git commit 007389c 提供","workspace/run.py"

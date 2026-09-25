@@ -1,0 +1,5 @@
+"material","role","availability","safe_locator"
+"原生会话 JSONL","保存用户要求、工具调用、结果和最终诊断","完整","sessions/2026/09/25/rollout-2026-09-25T17-07-03-01a0d7d1-7324-77a1-98dd-8bfd4d186313.jsonl#L2-L91"
+"workspace/run.py","触发脚本和环境变量入口","基线版本可从 Git 恢复","workspace/run.py"
+"workspace/deepanalyze.py","generate 与工作目录切换调用链","基线版本可从 Git 恢复","workspace/deepanalyze.py"
+"workspace/example/analysis_on_student_loan/README.md","仓库内推荐示例目录","完整","workspace/example/analysis_on_student_loan/README.md"

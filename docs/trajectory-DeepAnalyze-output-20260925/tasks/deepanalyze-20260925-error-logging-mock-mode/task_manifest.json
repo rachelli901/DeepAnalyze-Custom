@@ -1,0 +1,67 @@
+{
+  "safe_task_id": "deepanalyze-20260925-error-logging-mock-mode",
+  "task_title": "增加 API 错误日志与无 GPU Mock 模式",
+  "task_type": "可靠性 / 可测试性 / 可观测性",
+  "classification": "推荐提交",
+  "hard_gate": "通过硬门槛",
+  "completion_status": "success",
+  "source": {
+    "harness": "Codex Desktop",
+    "session_id": "01a0d7d1-7324-77a1-98dd-8bfd4d186313",
+    "session_relpath": "sessions/2026/09/25/rollout-2026-09-25T17-07-03-01a0d7d1-7324-77a1-98dd-8bfd4d186313.jsonl",
+    "turn_id": "01a0d7f0-36a3-7b62-98a6-34636d770ef6",
+    "event_line_start": 326,
+    "event_line_end": 448,
+    "ordinal_start": 325,
+    "ordinal_end": 447,
+    "timestamp_start": "2026-09-25T09:40:39.615Z",
+    "timestamp_end": "2026-09-25T09:42:33.904Z"
+  },
+  "workspace": {
+    "project": "DeepAnalyze",
+    "path_placeholder": "<PROJECT_ROOT>",
+    "base_branch": "main",
+    "base_commit": "007389cb2a51c58e0fb80a3c88243573a84c5365",
+    "completeness": "基本完整",
+    "uncommitted_at_scan": true
+  },
+  "evaluation": {
+    "complexity": "中",
+    "values": [
+      "工程价值：强",
+      "专业挑战：中",
+      "Agentic 深度：强",
+      "专家贡献：中",
+      "任务闭环：强",
+      "环境质量：强",
+      "验证价值：强"
+    ],
+    "reasons": [
+      "将静默异常改为分类 logger.exception、error 字段和非零退出码。",
+      "新增无 GPU Mock 模式与自定义响应序列，显著提升可测试性。",
+      "成功路径与 502 失败路径均被实际运行验证。"
+    ],
+    "minimum_evidence": [
+      "DEEPANALYZE_MOCK=1 下 python run.py 退出码 0，完成两轮模拟生成并打印工作区信息。",
+      "无服务时 502 响应触发 ERROR 日志和异常堆栈，脚本退出码 1。",
+      "代码检索确认 request_timeout 与 Mock 分支已进入 generate()。"
+    ]
+  },
+  "package": {
+    "path": "packages/deepanalyze-20260925-error-logging-mock-mode.zip",
+    "conversation_entry": "deepanalyze-20260925-error-logging-mock-mode/conversation.jsonl",
+    "original_session_sha256": "84f9879d0ce6f75f95fb01254bfb014f80a7d30d5a83a8dac10c1fe1c716b0de",
+    "sanitized_session_sha256": "a0e63fa39c4ad9d56871bf977220c6930c1a67919c1ee42c9b1eff6c074f7403",
+    "sanitization": "deterministic replacement of user home paths, project absolute roots, usernames, and emails"
+  },
+  "sensitivity": {
+    "detected_types": [
+      "user_home_absolute_path",
+      "project_absolute_path",
+      "username",
+      "email"
+    ],
+    "export_sanitized": true
+  },
+  "attachments": []
+}

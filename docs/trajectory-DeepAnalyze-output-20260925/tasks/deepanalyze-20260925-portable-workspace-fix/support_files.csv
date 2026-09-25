@@ -1,0 +1,5 @@
+"material","role","availability","safe_locator"
+"原生会话 JSONL","保存修改命令、diff、运行结果和失败诊断","完整","sessions/2026/09/25/rollout-2026-09-25T17-07-03-01a0d7d1-7324-77a1-98dd-8bfd4d186313.jsonl#L136-L324"
+"workspace/run.py","工作目录和模型配置入口","最终版本存在；基线由 Git commit 007389c 提供","workspace/run.py"
+"workspace/deepanalyze.py","工作目录验证与 cwd 恢复","最终版本存在；基线由 Git commit 007389c 提供","workspace/deepanalyze.py"
+"workspace/example/analysis_on_student_loan/data","默认示例工作目录","存在且含 21 个文件","workspace/example/analysis_on_student_loan/data"
